@@ -11,7 +11,7 @@ CONFIG = base / 'config'
 CALENDARS = {
     '六斋日（绿色）': ('liuzhairi','#34A853'),
     '十斋日（橘色）': ('shizhairi','#FB8C00'),
-    '灵性': ('lingxing','#4285F4'),
+    '灵性（蓝色）': ('lingxing','#4285F4'),
     '断食日（黄色）': ('duanshiri','#FBC02D'),
 }
 DAY_NAMES = {1:'初一',2:'初二',3:'初三',4:'初四',5:'初五',6:'初六',7:'初七',8:'初八',9:'初九',10:'初十',11:'十一',12:'十二',13:'十三',14:'十四',15:'十五',16:'十六',17:'十七',18:'十八',19:'十九',20:'二十',21:'二十一',22:'二十二',23:'二十三',24:'二十四',25:'二十五',26:'二十六',27:'二十七',28:'二十八',29:'二十九',30:'三十'}
@@ -48,7 +48,7 @@ def buddhist(start_year,end_year):
         six={8,14,15,23,29,30} if last==30 else {8,14,15,23,28,29}
         if ld in six:
             out.append(E('六斋日（绿色）',d,d+timedelta(days=1),f'斋戒-{DAY_NAMES[ld]}'))
-        if ld in TEN_ZHAI and ld<=last:
+        if ld in TEN_ZHAI and ld not in six and ld <= last:
             out.append(E('十斋日（橘色）',d,d+timedelta(days=1),DAY_NAMES[ld]))
     for (ly,lm,leap), ds in month_bounds.items():
         if not leap and lm in LONG_FASTING_MONTHS:
@@ -61,13 +61,13 @@ def spiritual(start_year,end_year):
     for d,ly,lm,ld,leap in records:
         k=(ly,lm,leap)
         if ld==1 and k not in seen1:
-            out.append(E('灵性',d,d+timedelta(days=1),'新月')); seen1.add(k)
+            out.append(E('灵性（蓝色）',d,d+timedelta(days=1),'新月')); seen1.add(k)
         if ld==15 and k not in seen15:
-            out.append(E('灵性',d,d+timedelta(days=1),'满月')); seen15.add(k)
+            out.append(E('灵性（蓝色）',d,d+timedelta(days=1),'满月')); seen15.add(k)
     for y in range(start_year,end_year+1):
         for n in range(1,13):
             d=date(y,n,n)
-            out.append(E('灵性',d,d+timedelta(days=1),'星门'))
+            out.append(E('灵性（蓝色）',d,d+timedelta(days=1),'星门'))
     return out
 
 def ekadashi(start_year,end_year):
@@ -76,21 +76,30 @@ def ekadashi(start_year,end_year):
     if f.exists():
         with f.open('r',encoding='utf-8-sig') as fh:
             for row in csv.DictReader(fh):
-                d=datetime.strptime(row['date'],'%Y-%m-%d').date()
-                manual.setdefault(d.year,[]).append(d)
-    month_map = {m:i for i,m in enumerate(['January','February','March','April','May','June','July','August','September','October','November','December'], start=1)}
+                if row.get('date'):
+                    d=datetime.strptime(row['date'],'%Y-%m-%d').date()
+                    manual.setdefault(d.year,[]).append(d)
+    month_map_full = {m:i for i,m in enumerate(['January','February','March','April','May','June','July','August','September','October','November','December'], start=1)}
+    month_map_short = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12}
     out=[]
     for y in range(start_year,end_year+1):
         dates=sorted(set(manual.get(y,[])))
         if not dates:
             scraped=set()
-            for url in ['https://harekrishnamandir.org/ekadasi', f'https://www.drikpanchang.com/vrats/ekadashidates.html?year={y}']:
+            urls=[
+                'https://harekrishnamandir.org/ekadasi',
+                f'https://www.baps.org/Calendar/{y}/EkadashiNomPunam.aspx',
+                f'https://www.drikpanchang.com/vrats/ekadashidates.html?year={y}'
+            ]
+            for url in urls:
                 try:
                     r=requests.get(url,timeout=30,headers={'User-Agent':'Mozilla/5.0'})
                     text=BeautifulSoup(r.text,'html.parser').get_text('\n',strip=True)
                     for month_name, day, yyyy in re.findall(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})', text):
                         if int(yyyy)==y:
-                            scraped.add(date(y,month_map[month_name],int(day)))
+                            scraped.add(date(y,month_map_full[month_name],int(day)))
+                    for mon, day in re.findall(r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*:\s*.*?Ekadashi', text):
+                        scraped.add(date(y,month_map_short[mon],int(day)))
                 except Exception:
                     pass
             dates=sorted(scraped)
@@ -128,7 +137,7 @@ def uid(cal,start,summary):
 
 def write_ics(calendar_name, events, path, color):
     lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Jitong Spiritual Calendar//CN','CALSCALE:GREGORIAN',f'X-WR-CALNAME:{esc(calendar_name)}',f'X-APPLE-CALENDAR-COLOR:{color}','X-WR-TIMEZONE:Asia/Shanghai']
-    stamp=datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    stamp=datetime.now().strftime('%Y%m%dT%H%M%SZ')
     for ev in sorted(events,key=lambda x:(x.start,x.summary)):
         lines += ['BEGIN:VEVENT',f'UID:{uid(ev.cal,ev.start,ev.summary)}',f'DTSTAMP:{stamp}',f'DTSTART;VALUE=DATE:{ev.start.strftime("%Y%m%d")}',f'DTEND;VALUE=DATE:{ev.end.strftime("%Y%m%d")}',f'SUMMARY:{esc(ev.summary)}']
         if ev.description:
